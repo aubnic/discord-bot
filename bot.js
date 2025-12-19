@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const fs = require('fs');
 
-const TOKEN = 'MTQ1MTE0OTY5MzcyMjgyMDY3Mg.Gfav_Y.pB2IAI8-qVBRqcRaDT_Dk3Y11EEgzORSnXDHz0'; // Erstatt med din bot-token
+const TOKEN = 'MTQ1MTE0OTY5MzcyMjgyMDY3Mg.G35b2i.JVSr9uc28AyxXEjDVOtSgK1B8GdTMfnFiVr2dU'; // Erstatt med din bot-token
 const CHANNEL_ID = '1450816596036685894'; // ID-en til kanalen rapporten skal i (høyreklikk kanal → Copy ID)
 const MESSAGE_FILE = 'last_message_id.txt'; // Fil for å lagre ID-en til meldingen vi oppdaterer
 
@@ -162,5 +162,6 @@ async function runReport() {
   fs.writeFileSync(MESSAGE_FILE, lastMessageId);
   console.log('Ny rapport sendt!');
 }
+
 
 client.login(TOKEN);
