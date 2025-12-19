@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const fs = require('fs');
 
-const TOKEN = 'MTQ1MTE0OTY5MzcyMjgyMDY3Mg.G35b2i.JVSr9uc28AyxXEjDVOtSgK1B8GdTMfnFiVr2dU'; // Erstatt med din bot-token
+const TOKEN = process.env.TOKEN;
 const CHANNEL_ID = '1450816596036685894'; // ID-en til kanalen rapporten skal i (høyreklikk kanal → Copy ID)
 const MESSAGE_FILE = 'last_message_id.txt'; // Fil for å lagre ID-en til meldingen vi oppdaterer
 
@@ -165,3 +165,4 @@ async function runReport() {
 
 
 client.login(TOKEN);
+
