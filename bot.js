@@ -37,7 +37,7 @@ async function runReport() {
 
   const shouldRun = allowedTimes.some(t => hour === t.hour && minute === t.minute);
 
-  // if (!shouldRun) return;
+  if (!shouldRun) return;
 
   console.log(`Kl. ${hour}:${minute} – Genererer rapport...`);
 
@@ -54,18 +54,6 @@ async function runReport() {
   ];
 
   const today = now.toISOString().slice(0, 10);
-
-  // Helligdager / stengte dager (YYYY-MM-DD)
-  const closedDates = [
-    '2025-12-24', // Julaften
-    '2025-12-25', // 1. juledag
-    '2025-12-26', // 2. juledag
-    '2025-12-31', // Nyttårsaften
-    '2026-01-01', // Nyttårsdag
-    // Legg til flere (f.eks. påske: '2026-04-05', '2026-04-06' osv.)
-  ];
-
-  const isClosedDay = closedDates.includes(today);
 
   const results = [];
 
@@ -112,8 +100,7 @@ async function runReport() {
       day: `${stats.dayO}/${stats.dayT} (${dayPct}%)`,
       prime: `${stats.primeO}/${stats.primeT} (${primePct}%)`,
       income: incomePerSim,
-      primePct,
-      isEmpty: stats.dayT + stats.primeT === 0 // For stengt-sjekk
+      primePct
     });
   }
 
@@ -121,24 +108,12 @@ async function runReport() {
 
   const timeStr = now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
 
-  let message = `Golfsimulator-trykk Oslo – ${now.toLocaleDateString('nb-NO')} kl. ${timeStr}\nSortert etter primetime-belastning i dag\n\n`;
-
-  if (isClosedDay) {
-    message += `**Merk: Mange simulatorer er stengt eller har redusert åpningstid i dag (helligdag).**\n\n`;
-  }
+  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} kl. ${timeStr}\n\n`;
 
   results.forEach(r => {
-    if (isClosedDay && r.isEmpty) {
-      message += `${r.name} – Stengt i dag\n\n`;
-      return;
-    }
-
-    const dayBar = '█'.repeat(Math.floor(parseInt(r.day.split('(')[1]) / 5)) + '░'.repeat(20 - Math.floor(parseInt(r.day.split('(')[1]) / 5));
-    const primeBar = '█'.repeat(Math.floor(r.primePct / 5)) + '░'.repeat(20 - Math.floor(r.primePct / 5));
-
-    message += `${r.name}\n` +
-      `Dag (<16:00): ${r.day} ${dayBar}\n` +
-      `Prime (≥16:00): ${r.prime} ${primeBar}\n` +
+    message += `**${r.name}**\n` +
+      `Dag (<16:00): ${r.day}\n` +
+      `Prime (≥16:00): ${r.prime}\n` +
       `~${r.income.toLocaleString('nb-NO')} kr/sim\n\n`;
   });
 
@@ -162,4 +137,3 @@ async function runReport() {
 }
 
 client.login(TOKEN);
-
