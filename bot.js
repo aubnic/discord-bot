@@ -125,20 +125,15 @@ async function runReport() {
 
   const timeStr = now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
 
-  let message = `Golfsimulator-trykk Oslo – ${now.toLocaleDateString('nb-NO')} kl. ${timeStr} 📊\nSortert etter primetime i dag\n\n`;
+  let message = `Golfsimulator-trykk Oslo – ${now.toLocaleDateString('nb-NO')} kl. ${timeStr}\n\n`;
 
   results.forEach(r => {
-    const barTodayDay = '█'.repeat(Math.floor(parseInt(r.todayDay.split('(')[1]) / 5)) + '░'.repeat(20 - Math.floor(parseInt(r.todayDay.split('(')[1]) / 5));
-    const barTodayPrime = '█'.repeat(Math.floor(parseInt(r.todayPrime.split('(')[1]) / 5)) + '░'.repeat(20 - Math.floor(parseInt(r.todayPrime.split('(')[1]) / 5));
-    const barTomorrowDay = '█'.repeat(Math.floor(parseInt(r.tomorrowDay.split('(')[1]) / 5)) + '░'.repeat(20 - Math.floor(parseInt(r.tomorrowDay.split('(')[1]) / 5));
-    const barTomorrowPrime = '█'.repeat(Math.floor(parseInt(r.tomorrowPrime.split('(')[1]) / 5)) + '░'.repeat(20 - Math.floor(parseInt(r.tomorrowPrime.split('(')[1]) / 5));
-
     message += `${r.name}\n` +
-      `I dag Dag: ${r.todayDay} ${barTodayDay}\n` +
-      `I dag Prime: ${r.todayPrime} ${barTodayPrime}\n` +
+      `I dag Dag: ${r.todayDay}\n` +
+      `I dag Prime: ${r.todayPrime}\n` +
       `~${r.todayIncome.toLocaleString('nb-NO')} kr/sim (i dag)\n\n` +
-      `I morgen Dag: ${r.tomorrowDay} ${barTomorrowDay}\n` +
-      `I morgen Prime: ${r.tomorrowPrime} ${barTomorrowPrime}\n` +
+      `I morgen Dag: ${r.tomorrowDay}\n` +
+      `I morgen Prime: ${r.tomorrowPrime}\n` +
       `~${r.tomorrowIncome.toLocaleString('nb-NO')} kr/sim (i morgen)\n\n`;
   });
 
@@ -165,5 +160,6 @@ async function runReport() {
 
 
 client.login(TOKEN);
+
 
 
