@@ -38,7 +38,7 @@ async function runReport() {
 
   const shouldRun = allowedTimes.some(t => hour === t.hour && minute === t.minute);
 
-  if (!shouldRun) return;
+ // if (!shouldRun) return;
 
   console.log(`Kl. ${hour}:${minute} – Genererer rapport...`);
 
@@ -165,4 +165,5 @@ async function runReport() {
 
 
 client.login(TOKEN);
+
 
