@@ -4,18 +4,19 @@ const fs = require('fs');
 const TOKEN = process.env.TOKEN;
 const CHANNEL_ID = '1450816596036685894';
 
-const MESSAGE_FILE = 'last_message_id.txt';
+const MESSAGE_ID_FILE = 'current_message_id.txt'; // Husker ID for dagens melding
+const DATE_FILE = 'current_date.txt'; // Husker dagens dato
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-let lastMessageId = null;
+let currentMessageId = null;
+let currentDate = null;
 
 try {
-  if (fs.existsSync(MESSAGE_FILE)) {
-    lastMessageId = fs.readFileSync(MESSAGE_FILE, 'utf8').trim();
-  }
+  if (fs.existsSync(MESSAGE_ID_FILE)) currentMessageId = fs.readFileSync(MESSAGE_ID_FILE, 'utf8').trim();
+  if (fs.existsSync(DATE_FILE)) currentDate = fs.readFileSync(DATE_FILE, 'utf8').trim();
 } catch (e) {}
 
 client.once('ready', () => {
@@ -28,6 +29,7 @@ async function runReport() {
   const now = new Date();
   const hour = now.getHours();
   const minute = now.getMinutes();
+  const todayStr = now.toISOString().slice(0, 10);
 
   const allowedTimes = [
     { hour: 9, minute: 0 },
@@ -39,7 +41,7 @@ async function runReport() {
 
   if (!shouldRun) return;
 
-  console.log(`Kl. ${hour}:${minute} – Genererer rapport...`);
+  console.log(`Kl. ${hour}:${minute} – Oppdaterer rapport for ${todayStr}...`);
 
   const venues = [
     { name: 'Oslo Golf Lounge', slug: 'oslo-golf-lounge', daytimePrice: 350, primetimePrice: 450 },
@@ -108,34 +110,43 @@ async function runReport() {
 
   const timeStr = now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
 
-  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} kl. ${timeStr}\n\n`;
+  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} (oppdatert kl. ${timeStr})\n*Sortert etter primetime-belastning*\n\n`;
 
   results.forEach(r => {
+    const dayBar = '█'.repeat(Math.floor(parseInt(r.day.split('(')[1]) / 10)) + '░'.repeat(10 - Math.floor(parseInt(r.day.split('(')[1]) / 10));
+    const primeBar = '█'.repeat(Math.floor(r.primePct / 10)) + '░'.repeat(10 - Math.floor(r.primePct / 10));
+
     message += `**${r.name}**\n` +
-      `Dag (<16:00): ${r.day}\n` +
-      `Prime (≥16:00): ${r.prime}\n` +
+      `Dag: ${r.day} ${dayBar}\n` +
+      `Prime: ${r.prime} ${primeBar}\n` +
       `~${r.income.toLocaleString('nb-NO')} kr/sim\n\n`;
   });
 
   const channel = await client.channels.fetch(CHANNEL_ID);
 
-  if (lastMessageId) {
+  // Sjekk om det er ny dag
+  if (currentDate !== todayStr || !currentMessageId) {
+    // Ny dag – send ny melding
+    const newMsg = await channel.send(message);
+    currentMessageId = newMsg.id;
+    currentDate = todayStr;
+    fs.writeFileSync(MESSAGE_ID_FILE, currentMessageId);
+    fs.writeFileSync(DATE_FILE, currentDate);
+    console.log('Ny melding for ny dag sendt!');
+  } else {
+    // Samme dag – oppdater eksisterende melding
     try {
-      const msg = await channel.messages.fetch(lastMessageId);
+      const msg = await channel.messages.fetch(currentMessageId);
       await msg.edit(message);
-      console.log('Rapport oppdatert!');
-      return;
+      console.log('Dagens melding oppdatert!');
     } catch (e) {
-      console.log('Kunne ikke redigere – sender ny');
+      // Hvis meldingen er slettet – send ny
+      const newMsg = await channel.send(message);
+      currentMessageId = newMsg.id;
+      fs.writeFileSync(MESSAGE_ID_FILE, currentMessageId);
+      console.log('Ny melding sendt (gammel slettet)');
     }
   }
-
-  const newMsg = await channel.send(message);
-  lastMessageId = newMsg.id;
-  fs.writeFileSync(MESSAGE_FILE, lastMessageId);
-  console.log('Ny rapport sendt!');
 }
 
 client.login(TOKEN);
-
-
