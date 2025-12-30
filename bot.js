@@ -4,19 +4,19 @@ const fs = require('fs');
 const TOKEN = process.env.TOKEN;
 const CHANNEL_ID = '1450816596036685894';
 
-const MESSAGE_ID_FILE = 'current_message_id.txt'; // Husker ID for dagens melding
-const DATE_FILE = 'current_date.txt'; // Husker dagens dato
+const STATS_FILE = 'daily_stats.json'; // Lagrer kumulativ statistikk for i dag
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-let currentMessageId = null;
-let currentDate = null;
+let lastMessageId = null;
+const MESSAGE_FILE = 'last_message_id.txt';
 
 try {
-  if (fs.existsSync(MESSAGE_ID_FILE)) currentMessageId = fs.readFileSync(MESSAGE_ID_FILE, 'utf8').trim();
-  if (fs.existsSync(DATE_FILE)) currentDate = fs.readFileSync(DATE_FILE, 'utf8').trim();
+  if (fs.existsSync(MESSAGE_FILE)) {
+    lastMessageId = fs.readFileSync(MESSAGE_FILE, 'utf8').trim();
+  }
 } catch (e) {}
 
 client.once('ready', () => {
@@ -29,7 +29,6 @@ async function runReport() {
   const now = new Date();
   const hour = now.getHours();
   const minute = now.getMinutes();
-  const todayStr = now.toISOString().slice(0, 10);
 
   const allowedTimes = [
     { hour: 9, minute: 0 },
@@ -41,7 +40,7 @@ async function runReport() {
 
   if (!shouldRun) return;
 
-  console.log(`Kl. ${hour}:${minute} – Oppdaterer rapport for ${todayStr}...`);
+  console.log(`Kl. ${hour}:${minute} – Oppdaterer kumulativ rapport...`);
 
   const venues = [
     { name: 'Oslo Golf Lounge', slug: 'oslo-golf-lounge', daytimePrice: 350, primetimePrice: 450 },
@@ -57,10 +56,25 @@ async function runReport() {
 
   const today = now.toISOString().slice(0, 10);
 
-  const results = [];
+  // Last inn eksisterende kumulativ statistikk (eller start ny)
+  let cumulativeStats = {};
+  if (fs.existsSync(STATS_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+      if (data.date === today) cumulativeStats = data.stats;
+    } catch (e) {}
+  }
 
+  // Initialiser hvis ny dag
+  if (Object.keys(cumulativeStats).length === 0) {
+    venues.forEach(v => {
+      cumulativeStats[v.slug] = { dayO: 0, dayT: 0, primeO: 0, primeT: 0, income: 0, sims: 1 };
+    });
+  }
+
+  // Hent fersk data fra API
   for (const v of venues) {
-    const stats = { dayT: 0, dayO: 0, primeT: 0, primeO: 0, income: 0, sims: 1 };
+    const stats = cumulativeStats[v.slug] || { dayO: 0, dayT: 0, primeO: 0, primeT: 0, income: 0, sims: 1 };
 
     try {
       const res = await fetch('https://albaplay.com/api/graphql', {
@@ -88,29 +102,44 @@ async function runReport() {
         const prime = h >= 16;
         const o = slot.availability.state !== 'AVAILABLE';
 
-        if (prime) { stats.primeT++; if (o) { stats.primeO++; stats.income += v.primetimePrice; } }
-        else { stats.dayT++; if (o) { stats.dayO++; stats.income += v.daytimePrice; } }
+        if (prime) {
+          stats.primeT = Math.max(stats.primeT, stats.primeT + 1); // Total slots øker ikke, men vi teller opptatt
+          if (o && stats.primeO < stats.primeT) stats.primeO++; // Kun øk opptatt hvis ny booket
+          if (o) stats.income = Math.max(stats.income, stats.income + v.primetimePrice);
+        } else {
+          stats.dayT = Math.max(stats.dayT, stats.dayT + 1);
+          if (o && stats.dayO < stats.dayT) stats.dayO++;
+          if (o) stats.income = Math.max(stats.income, stats.income + v.daytimePrice);
+        }
       }));
     } catch (e) {}
 
-    const dayPct = stats.dayT ? Math.round(stats.dayO / stats.dayT * 100) : 0;
-    const primePct = stats.primeT ? Math.round(stats.primeO / stats.primeT * 100) : 0;
-    const incomePerSim = stats.sims ? Math.round(stats.income / stats.sims) : 0;
+    cumulativeStats[v.slug] = stats;
+  }
 
-    results.push({
+  // Lagre kumulativ statistikk for neste kjøring
+  fs.writeFileSync(STATS_FILE, JSON.stringify({ date: today, stats: cumulativeStats }));
+
+  const results = venues.map(v => {
+    const s = cumulativeStats[v.slug];
+    const dayPct = s.dayT ? Math.round(s.dayO / s.dayT * 100) : 0;
+    const primePct = s.primeT ? Math.round(s.primeO / s.primeT * 100) : 0;
+    const incomePerSim = s.sims ? Math.round(s.income / s.sims) : 0;
+
+    return {
       name: v.name,
-      day: `${stats.dayO}/${stats.dayT} (${dayPct}%)`,
-      prime: `${stats.primeO}/${stats.primeT} (${primePct}%)`,
+      day: `${s.dayO}/${s.dayT} (${dayPct}%)`,
+      prime: `${s.primeO}/${s.primeT} (${primePct}%)`,
       income: incomePerSim,
       primePct
-    });
-  }
+    };
+  });
 
   results.sort((a, b) => b.primePct - a.primePct);
 
   const timeStr = now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
 
-  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} (oppdatert kl. ${timeStr})\n*Sortert etter primetime-belastning*\n\n`;
+  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} (oppdatert kl. ${timeStr})\n*Kumulativ – alle bookinger telt*\n\n`;
 
   results.forEach(r => {
     const dayBar = '█'.repeat(Math.floor(parseInt(r.day.split('(')[1]) / 10)) + '░'.repeat(10 - Math.floor(parseInt(r.day.split('(')[1]) / 10));
@@ -124,27 +153,21 @@ async function runReport() {
 
   const channel = await client.channels.fetch(CHANNEL_ID);
 
-  // Sjekk om det er ny dag
-  if (currentDate !== todayStr || !currentMessageId) {
-    // Ny dag – send ny melding
+  // Ny dag? Ny melding
+  const currentDate = now.toISOString().slice(0, 10);
+  if (!lastMessageId || currentDate !== (fs.existsSync('current_date.txt') ? fs.readFileSync('current_date.txt', 'utf8').trim() : '')) {
     const newMsg = await channel.send(message);
-    currentMessageId = newMsg.id;
-    currentDate = todayStr;
-    fs.writeFileSync(MESSAGE_ID_FILE, currentMessageId);
-    fs.writeFileSync(DATE_FILE, currentDate);
-    console.log('Ny melding for ny dag sendt!');
+    lastMessageId = newMsg.id;
+    fs.writeFileSync(MESSAGE_FILE, lastMessageId);
+    fs.writeFileSync('current_date.txt', currentDate);
   } else {
-    // Samme dag – oppdater eksisterende melding
     try {
-      const msg = await channel.messages.fetch(currentMessageId);
+      const msg = await channel.messages.fetch(lastMessageId);
       await msg.edit(message);
-      console.log('Dagens melding oppdatert!');
     } catch (e) {
-      // Hvis meldingen er slettet – send ny
       const newMsg = await channel.send(message);
-      currentMessageId = newMsg.id;
-      fs.writeFileSync(MESSAGE_ID_FILE, currentMessageId);
-      console.log('Ny melding sendt (gammel slettet)');
+      lastMessageId = newMsg.id;
+      fs.writeFileSync(MESSAGE_FILE, lastMessageId);
     }
   }
 }
