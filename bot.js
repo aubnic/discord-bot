@@ -4,19 +4,17 @@ const fs = require('fs');
 const TOKEN = process.env.TOKEN;
 const CHANNEL_ID = '1450816596036685894';
 
-const STATS_FILE = 'daily_stats.json'; // Lagrer kumulativ statistikk for i dag
+const STATS_FILE = 'daily_stats.json'; // Kumulativ statistikk
+const MESSAGE_FILE = 'last_message_id.txt';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
 let lastMessageId = null;
-const MESSAGE_FILE = 'last_message_id.txt';
 
 try {
-  if (fs.existsSync(MESSAGE_FILE)) {
-    lastMessageId = fs.readFileSync(MESSAGE_FILE, 'utf8').trim();
-  }
+  if (fs.existsSync(MESSAGE_FILE)) lastMessageId = fs.readFileSync(MESSAGE_FILE, 'utf8').trim();
 } catch (e) {}
 
 client.once('ready', () => {
@@ -40,7 +38,7 @@ async function runReport() {
 
   if (!shouldRun) return;
 
-  console.log(`Kl. ${hour}:${minute} – Oppdaterer kumulativ rapport...`);
+  console.log(`Kl. ${hour}:${minute} – Oppdaterer rapport...`);
 
   const venues = [
     { name: 'Oslo Golf Lounge', slug: 'oslo-golf-lounge', daytimePrice: 350, primetimePrice: 450 },
@@ -56,25 +54,23 @@ async function runReport() {
 
   const today = now.toISOString().slice(0, 10);
 
-  // Last inn eksisterende kumulativ statistikk (eller start ny)
-  let cumulativeStats = {};
+  let stats = {};
+
+  // Last inn eller initialiser kumulativ statistikk
   if (fs.existsSync(STATS_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
-      if (data.date === today) cumulativeStats = data.stats;
+      if (data.date === today) stats = data.stats;
     } catch (e) {}
   }
 
-  // Initialiser hvis ny dag
-  if (Object.keys(cumulativeStats).length === 0) {
-    venues.forEach(v => {
-      cumulativeStats[v.slug] = { dayO: 0, dayT: 0, primeO: 0, primeT: 0, income: 0, sims: 1 };
-    });
+  if (Object.keys(stats).length === 0) {
+    venues.forEach(v => stats[v.slug] = { dayO: 0, dayT: 0, primeO: 0, primeT: 0, income: 0, sims: 1 });
   }
 
-  // Hent fersk data fra API
+  // Hent fersk data
   for (const v of venues) {
-    const stats = cumulativeStats[v.slug] || { dayO: 0, dayT: 0, primeO: 0, primeT: 0, income: 0, sims: 1 };
+    const s = stats[v.slug];
 
     try {
       const res = await fetch('https://albaplay.com/api/graphql', {
@@ -95,7 +91,7 @@ async function runReport() {
       if (!json.data?.locationBySlugForCalendar?.locationCalendar) continue;
 
       const resources = json.data.locationBySlugForCalendar.locationCalendar.resourceWithCalendar || [];
-      stats.sims = Math.max(stats.sims, resources.length);
+      s.sims = Math.max(s.sims, resources.length);
 
       resources.forEach(r => r.slots.forEach(slot => {
         const h = parseInt(slot.startTime.split('T')[1].split(':')[0]);
@@ -103,25 +99,24 @@ async function runReport() {
         const o = slot.availability.state !== 'AVAILABLE';
 
         if (prime) {
-          stats.primeT = Math.max(stats.primeT, stats.primeT + 1); // Total slots øker ikke, men vi teller opptatt
-          if (o && stats.primeO < stats.primeT) stats.primeO++; // Kun øk opptatt hvis ny booket
-          if (o) stats.income = Math.max(stats.income, stats.income + v.primetimePrice);
+          s.primeT = Math.max(s.primeT, s.primeT + (prime ? 1 : 0));
+          if (o) s.primeO = Math.max(s.primeO, s.primeO + 1);
+          if (o) s.income = Math.max(s.income, s.income + v.primetimePrice);
         } else {
-          stats.dayT = Math.max(stats.dayT, stats.dayT + 1);
-          if (o && stats.dayO < stats.dayT) stats.dayO++;
-          if (o) stats.income = Math.max(stats.income, stats.income + v.daytimePrice);
+          // Daytime: Kun øk hvis det er ny slot (første gang vi ser den)
+          if (s.dayT < s.dayT + 1) s.dayT++;
+          if (o) s.dayO = Math.max(s.dayO, s.dayO + 1);
+          if (o) s.income = Math.max(s.income, s.income + v.daytimePrice);
         }
       }));
     } catch (e) {}
-
-    cumulativeStats[v.slug] = stats;
   }
 
-  // Lagre kumulativ statistikk for neste kjøring
-  fs.writeFileSync(STATS_FILE, JSON.stringify({ date: today, stats: cumulativeStats }));
+  // Lagre for neste kjøring
+  fs.writeFileSync(STATS_FILE, JSON.stringify({ date: today, stats }));
 
   const results = venues.map(v => {
-    const s = cumulativeStats[v.slug];
+    const s = stats[v.slug];
     const dayPct = s.dayT ? Math.round(s.dayO / s.dayT * 100) : 0;
     const primePct = s.primeT ? Math.round(s.primeO / s.primeT * 100) : 0;
     const incomePerSim = s.sims ? Math.round(s.income / s.sims) : 0;
@@ -139,7 +134,7 @@ async function runReport() {
 
   const timeStr = now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
 
-  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} (oppdatert kl. ${timeStr})\n*Kumulativ – alle bookinger telt*\n\n`;
+  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} kl. ${timeStr}\n*Kumulativ – ekte bookinger*\n\n`;
 
   results.forEach(r => {
     const dayBar = '█'.repeat(Math.floor(parseInt(r.day.split('(')[1]) / 10)) + '░'.repeat(10 - Math.floor(parseInt(r.day.split('(')[1]) / 10));
@@ -153,14 +148,7 @@ async function runReport() {
 
   const channel = await client.channels.fetch(CHANNEL_ID);
 
-  // Ny dag? Ny melding
-  const currentDate = now.toISOString().slice(0, 10);
-  if (!lastMessageId || currentDate !== (fs.existsSync('current_date.txt') ? fs.readFileSync('current_date.txt', 'utf8').trim() : '')) {
-    const newMsg = await channel.send(message);
-    lastMessageId = newMsg.id;
-    fs.writeFileSync(MESSAGE_FILE, lastMessageId);
-    fs.writeFileSync('current_date.txt', currentDate);
-  } else {
+  if (lastMessageId) {
     try {
       const msg = await channel.messages.fetch(lastMessageId);
       await msg.edit(message);
@@ -169,6 +157,10 @@ async function runReport() {
       lastMessageId = newMsg.id;
       fs.writeFileSync(MESSAGE_FILE, lastMessageId);
     }
+  } else {
+    const newMsg = await channel.send(message);
+    lastMessageId = newMsg.id;
+    fs.writeFileSync(MESSAGE_FILE, lastMessageId);
   }
 }
 
