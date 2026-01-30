@@ -34,11 +34,17 @@ async function runReport() {
   const minute = now.getMinutes();
   const today = now.toISOString().slice(0, 10);
 
-  // Sjekk om ny dag – reset stats hvis ny
-  if (currentDate !== today) {
-    currentDate = today;
-    fs.writeFileSync(STATS_FILE, JSON.stringify({ date: today, stats: {} }));
-    console.log(`Ny dag: ${today} – resetter kumulativ stats`);
+  // Last inn lagret dato fra fil hver gang
+  let storedDate = null;
+  if (fs.existsSync(DATE_FILE)) {
+    storedDate = fs.readFileSync(DATE_FILE, 'utf8').trim();
+  }
+
+  if (storedDate !== todayStr) {
+    currentDate = todayStr;
+    lastMessageId = null;
+    fs.writeFileSync(DATE_FILE, todayStr);
+    console.log(`Ny dag: ${todayStr} – resetter message ID og starter ny melding`);
   }
 
   const allowedTimes = [
@@ -176,3 +182,4 @@ async function runReport() {
 }
 
 client.login(TOKEN);
+
