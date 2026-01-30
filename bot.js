@@ -2,10 +2,11 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 
 const TOKEN = process.env.TOKEN;
-const CHANNEL_ID = '1450816596036685894';
+const CHANNEL_ID = '1450816596036685894'; // Erstatt med din kanal-ID
 
 const STATS_FILE = 'daily_stats.json'; // Kumulativ max bookinger
-const MESSAGE_FILE = 'last_message_id.txt';
+const MESSAGE_FILE = 'last_message_id.txt'; // ID for dagens melding
+const DATE_FILE = 'current_date.txt'; // Dagens dato for ny dag-sjekk
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
@@ -16,10 +17,7 @@ let currentDate = null;
 
 try {
   if (fs.existsSync(MESSAGE_FILE)) lastMessageId = fs.readFileSync(MESSAGE_FILE, 'utf8').trim();
-  if (fs.existsSync(STATS_FILE)) {
-    const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
-    currentDate = data.date;
-  }
+  if (fs.existsSync(DATE_FILE)) currentDate = fs.readFileSync(DATE_FILE, 'utf8').trim();
 } catch (e) {}
 
 client.once('ready', () => {
@@ -32,19 +30,22 @@ async function runReport() {
   const now = new Date();
   const hour = now.getHours();
   const minute = now.getMinutes();
-  const today = now.toISOString().slice(0, 10);
+  const todayStr = now.toISOString().slice(0, 10);
 
-  // Last inn lagret dato fra fil hver gang
+  // Last inn lagret dato fra fil hver kjøring
   let storedDate = null;
   if (fs.existsSync(DATE_FILE)) {
     storedDate = fs.readFileSync(DATE_FILE, 'utf8').trim();
   }
 
+  // Hvis ny dag – reset message ID og stats
   if (storedDate !== todayStr) {
     currentDate = todayStr;
     lastMessageId = null;
     fs.writeFileSync(DATE_FILE, todayStr);
-    console.log(`Ny dag: ${todayStr} – resetter message ID og starter ny melding`);
+    // Reset stats for ny dag
+    fs.writeFileSync(STATS_FILE, JSON.stringify({ date: todayStr, stats: {} }));
+    console.log(`Ny dag: ${todayStr} – resetter melding og stats`);
   }
 
   const allowedTimes = [
@@ -57,7 +58,7 @@ async function runReport() {
 
   if (!shouldRun) return;
 
-  console.log(`Kl. ${hour}:${minute} – Oppdaterer kumulativ rapport...`);
+  console.log(`Kl. ${hour}:${minute} – Oppdaterer kumulativ rapport for ${todayStr}...`);
 
   const venues = [
     { name: 'Oslo Golf Lounge', slug: 'oslo-golf-lounge', daytimePrice: 350, primetimePrice: 450 },
@@ -66,22 +67,23 @@ async function runReport() {
     { name: 'Golfshopen Bryn', slug: 'golfshopen-bryn', daytimePrice: 300, primetimePrice: 499 },
     { name: 'Golfshopen Skøyen', slug: 'golfshopen-skoyen', daytimePrice: 300, primetimePrice: 499 },
     { name: 'Golfshopen Billingstad', slug: 'golfshopen-billingstad', daytimePrice: 300, primetimePrice: 499 },
-    { name: 'Golfland (Oslo GK)', slug: 'golfland', daytimePrice: 395, primetimePrice: 495 },
   ];
 
-  // Last inn kumulativ max stats
+  // Last inn kumulativ stats
   let stats = {};
-  try {
-    const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
-    if (data.date === today) stats = data.stats;
-  } catch (e) {}
+  if (fs.existsSync(STATS_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+      if (data.date === todayStr) stats = data.stats;
+    } catch (e) {}
+  }
 
   // Initialiser manglende venues
   venues.forEach(v => {
     if (!stats[v.slug]) stats[v.slug] = { dayO: 0, dayT: 0, primeO: 0, primeT: 0, income: 0, sims: 1 };
   });
 
-  // Hent fersk data og oppdater max
+  // Hent fersk data og oppdater max bookinger
   for (const v of venues) {
     const s = stats[v.slug];
 
@@ -91,7 +93,7 @@ async function runReport() {
         headers: { 'content-type': 'application/json', 'x-client-version': 'dff938ea09b01fbfd186702458b40d1980e07c36' },
         body: JSON.stringify({
           operationName: 'GetLocationCalendarHookExplicitV2',
-          variables: { slug: v.slug, date: today, resourceType: 'SIM' },
+          variables: { slug: v.slug, date: todayStr, resourceType: 'SIM' },
           query: `query GetLocationCalendarHookExplicitV2($slug: String!, $date: String!, $resourceType: ResourceType!) {
             locationBySlugForCalendar(slug: $slug, date: $date, resourceType: $resourceType) {
               locationCalendar { resourceWithCalendar { name slots { startTime availability { state } } } }
@@ -122,15 +124,15 @@ async function runReport() {
         }
       }));
 
-      // Oppdater max bookinger (kumulativ)
+      // Oppdater max kumulativt (ignorer avbestillinger)
       s.dayO = Math.max(s.dayO, currentDayO);
       s.primeO = Math.max(s.primeO, currentPrimeO);
-      s.income = Math.max(s.income, s.dayO * v.daytimePrice + s.primeO * v.primetimePrice);
+      s.income = s.dayO * v.daytimePrice + s.primeO * v.primetimePrice;
     } catch (e) {}
   }
 
   // Lagre oppdatert stats
-  fs.writeFileSync(STATS_FILE, JSON.stringify({ date: today, stats }));
+  fs.writeFileSync(STATS_FILE, JSON.stringify({ date: todayStr, stats }));
 
   const results = venues.map(v => {
     const s = stats[v.slug];
@@ -149,9 +151,9 @@ async function runReport() {
 
   results.sort((a, b) => b.primePct - a.primePct);
 
-  const timeStr = now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
+  const timeStr = now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Oslo' });
 
-  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} (oppdatert kl. ${timeStr})\n*Kumulativ booking-oversikt*\n\n`;
+  let message = `**🏌️ Golfsimulator-trykk Oslo** – ${now.toLocaleDateString('nb-NO')} kl. ${timeStr}\n*Kumulativ booking-oversikt (alle bookinger telt)*\n\n`;
 
   results.forEach(r => {
     message += `**${r.name}**\n` +
@@ -177,9 +179,8 @@ async function runReport() {
     const newMsg = await channel.send(message);
     lastMessageId = newMsg.id;
     fs.writeFileSync(MESSAGE_FILE, lastMessageId);
-    console.log('Ny melding sendt!');
+    console.log('Ny melding for dagen sendt!');
   }
 }
 
 client.login(TOKEN);
-
